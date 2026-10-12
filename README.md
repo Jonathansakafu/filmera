@@ -2,6 +2,8 @@
 
 **Your camera. Enhanced in real time.**
 
+📲 **Download:** https://jonathansakafu.github.io/filmera/ · [latest APK](https://github.com/Jonathansakafu/filmera/releases/latest/download/FILMERA.apk)
+
 FILMERA is an Android camera app with live, GPU-rendered filters and face effects. You
 see the effect on the live camera feed, then take a photo (tap) or record a video (hold),
 and share it to WhatsApp, Instagram, Telegram or any other app.
@@ -25,6 +27,7 @@ It works on its own. It does not need WhatsApp or any other app to be useful.
 | Quality profiles (Auto / Performance / Balanced / Ultra), auto step-down when FPS drops | ✅ |
 | Device compatibility screen with honest support badges | ✅ |
 | Hidden developer mode (tap Version 7×): performance overlay, diagnostics export | ✅ |
+| "Allow access" screen explains and requests Camera, Microphone (and Storage on Android 9 and older) | ✅ |
 | Privacy: everything on-device, no network permission, no analytics | ✅ |
 
 ## What it does *not* do, and why

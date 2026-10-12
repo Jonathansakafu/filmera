@@ -23,6 +23,8 @@ import com.filmera.app.feature.gallery.ViewerScreen
 import com.filmera.app.feature.home.HomeScreen
 import com.filmera.app.feature.onboarding.IntroScreen
 import com.filmera.app.feature.onboarding.OnboardingScreen
+import com.filmera.app.feature.onboarding.PermissionsScreen
+import com.filmera.app.feature.onboarding.hasCameraPermission
 import com.filmera.app.feature.settings.PrivacyScreen
 import com.filmera.app.feature.settings.SettingsScreen
 import kotlinx.coroutines.flow.first
@@ -31,6 +33,7 @@ import kotlinx.coroutines.launch
 private object Routes {
     const val INTRO = "intro"
     const val ONBOARDING = "onboarding"
+    const val PERMISSIONS = "permissions"
     const val HOME = "home"
     const val CAMERA = "camera?category={category}&filter={filter}"
     const val GALLERY = "gallery"
@@ -62,7 +65,12 @@ fun FilmeraNavHost(nav: NavHostController = rememberNavController()) {
             IntroScreen(onFinished = {
                 scope.launch {
                     val done = context.container.settings.settings.first().onboardingDone
-                    nav.navigate(if (done) Routes.HOME else Routes.ONBOARDING) {
+                    val next = when {
+                        !done -> Routes.ONBOARDING
+                        !hasCameraPermission(context) -> Routes.PERMISSIONS
+                        else -> Routes.HOME
+                    }
+                    nav.navigate(next) {
                         popUpTo(Routes.INTRO) { inclusive = true }
                     }
                 }
@@ -71,7 +79,12 @@ fun FilmeraNavHost(nav: NavHostController = rememberNavController()) {
         composable(Routes.ONBOARDING) {
             OnboardingScreen(onDone = {
                 scope.launch { context.container.settings.setOnboardingDone() }
-                nav.navigate(Routes.HOME) { popUpTo(Routes.ONBOARDING) { inclusive = true } }
+                nav.navigate(Routes.PERMISSIONS) { popUpTo(Routes.ONBOARDING) { inclusive = true } }
+            })
+        }
+        composable(Routes.PERMISSIONS) {
+            PermissionsScreen(onContinue = {
+                nav.navigate(Routes.HOME) { popUpTo(Routes.PERMISSIONS) { inclusive = true } }
             })
         }
         composable(Routes.HOME) {
