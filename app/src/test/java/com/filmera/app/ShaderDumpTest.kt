@@ -16,6 +16,7 @@ class ShaderDumpTest {
         File(dir, "vertex.vert").writeText("#version 100\n" + FilterShaders.VERTEX)
         FilterCatalog.all.forEach { f ->
             File(dir, "${f.id}.frag").writeText("#version 100\n" + FilterShaders.fragment(f))
+            File(dir, "${f.id}.2d.frag").writeText("#version 100\n" + FilterShaders.fragment(f, external = false))
         }
     }
 }

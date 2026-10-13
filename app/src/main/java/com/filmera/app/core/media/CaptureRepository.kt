@@ -57,7 +57,7 @@ class CaptureRepository(private val context: Context) {
 
     suspend fun savePhoto(bitmap: Bitmap): Capture = withContext(Dispatchers.IO) {
         val file = File(dir, "FILMERA_${stamp()}.jpg")
-        file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 92, it) }
+        file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.JPEG, 95, it) }
         Capture(file, false, file.lastModified()).also { refresh() }
     }
 

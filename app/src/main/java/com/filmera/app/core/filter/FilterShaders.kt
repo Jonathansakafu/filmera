@@ -165,14 +165,22 @@ vec3 adjust(vec3 c) {
 }
 """
 
-    fun fragment(filter: FilterDefinition): String {
+    /**
+     * Full fragment shader for [filter]. [external] reads the live camera stream
+     * (samplerExternalOES); false reads an ordinary 2D texture, used to apply the same
+     * look to full-resolution photos.
+     */
+    fun fragment(filter: FilterDefinition, external: Boolean = true): String {
         val main = if (filter.blendWithOriginal) {
             "vec3 col = mix(cam(vImageUv), effect(vImageUv), uIntensity);"
         } else {
             "vec3 col = effect(vImageUv);"
         }
+        val common = if (external) COMMON else COMMON
+            .replace("#extension GL_OES_EGL_image_external : require\n", "")
+            .replace("uniform samplerExternalOES uTex;", "uniform sampler2D uTex;")
         return buildString {
-            append(COMMON)
+            append(common)
             append("\nvec3 effect(vec2 uv) {\n")
             append(filter.shader.trimIndent())
             append("\n}\n\nvoid main() {\n    ")

@@ -7,7 +7,14 @@ import android.os.Build
 import android.os.Debug
 import android.os.PowerManager
 import android.util.Log
+import androidx.camera.core.FocusMeteringAction
+import androidx.camera.core.ImageCapture
+import androidx.camera.core.ImageCaptureException
+import androidx.camera.core.ImageProxy
+import androidx.camera.core.SurfaceOrientedMeteringPointFactory
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.viewModelScope
@@ -62,6 +69,8 @@ data class CameraUiState(
     val hasFlash: Boolean = false,
     val mode: CaptureMode = CaptureMode.PHOTO,
     val recording: Boolean = false,
+    /** A full-resolution photo is being captured and processed. */
+    val capturing: Boolean = false,
     val recordStartedAt: Long = 0,
     val profile: QualityProfile = QualityProfile.BALANCED,
     val faceStatus: FaceTracker.Status = FaceTracker.Status.LOADING,
@@ -293,8 +302,57 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
 
     // ----------------------------------------------------------- capture
 
+    /**
+     * Takes a full-resolution photo through the camera's still pipeline (like the stock
+     * camera app), then applies the current filter at full resolution on the GPU. Falls
+     * back to grabbing the filtered preview frame if any step isn't supported.
+     */
     fun takePhoto() {
-        if (_state.value.recording) return
+        if (_state.value.recording || _state.value.capturing) return
+        val still = controller.imageCapture ?: return takePreviewPhoto()
+        _state.update { it.copy(capturing = true) }
+        val face = pipeline.face
+        still.takePicture(
+            ContextCompat.getMainExecutor(getApplication()),
+            object : ImageCapture.OnImageCapturedCallback() {
+                override fun onCaptureSuccess(image: ImageProxy) {
+                    val rotation = (image.imageInfo.rotationDegrees + _state.value.settings.rotationFix) % 360
+                    viewModelScope.launch {
+                        val saved = try {
+                            val raw = withContext(Dispatchers.Default) { image.toBitmap() }
+                            image.close()
+                            val upright = withContext(Dispatchers.Default) { rotate(raw, rotation) }
+                            val filtered = pipeline.renderStill(upright, face)
+                            upright.recycle()
+                            filtered?.let { container.captures.savePhoto(it).also { _ -> it.recycle() } }
+                        } catch (e: Throwable) {
+                            Log.e(TAG, "Full-resolution photo failed", e)
+                            image.close()
+                            null
+                        }
+                        _state.update { it.copy(capturing = false) }
+                        if (saved != null) afterCapture(saved, "Photo") else takePreviewPhoto()
+                    }
+                }
+
+                override fun onError(e: ImageCaptureException) {
+                    Log.w(TAG, "Still capture failed, using preview frame", e)
+                    _state.update { it.copy(capturing = false) }
+                    takePreviewPhoto()
+                }
+            },
+        )
+    }
+
+    private fun rotate(src: android.graphics.Bitmap, degrees: Int): android.graphics.Bitmap {
+        if (degrees == 0) return src
+        val m = android.graphics.Matrix().apply { postRotate(degrees.toFloat()) }
+        return android.graphics.Bitmap.createBitmap(src, 0, 0, src.width, src.height, m, true)
+            .also { if (it !== src) src.recycle() }
+    }
+
+    /** Saves the filtered preview frame (lower resolution; works on every device). */
+    private fun takePreviewPhoto() {
         pipeline.capturePhoto { bitmap ->
             viewModelScope.launch {
                 if (bitmap == null) {
@@ -306,6 +364,17 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                 afterCapture(capture, "Photo")
             }
         }
+    }
+
+    /** Focuses and meters on a point of the preview, given as fractions of its size. */
+    fun focusAt(xFraction: Float, yFraction: Float) {
+        val cam = controller.camera ?: return
+        val p = pipeline.screenToSensor(xFraction, yFraction) ?: return
+        val point = SurfaceOrientedMeteringPointFactory(1f, 1f).createPoint(p.x, p.y)
+        val action = FocusMeteringAction.Builder(point, FocusMeteringAction.FLAG_AF or FocusMeteringAction.FLAG_AE)
+            .setAutoCancelDuration(4, java.util.concurrent.TimeUnit.SECONDS)
+            .build()
+        cam.cameraControl.startFocusAndMetering(action)
     }
 
     fun startRecording(maxSeconds: Int) {

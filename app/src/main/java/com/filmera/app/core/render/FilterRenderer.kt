@@ -50,25 +50,40 @@ class FilterRenderer {
 
     private val imageToTex = FloatArray(16)
 
+    /**
+     * Draws [texture] through the current filter. [external] is true for the live camera
+     * (OES texture) and false for a full-resolution photo in a 2D texture.
+     * [texelScale] < 1 makes blur/sharpen radii match the preview when the source is
+     * larger than the preview, so a photo looks like what was on screen.
+     */
     fun draw(
-        oesTexture: Int,
+        texture: Int,
         surfaceTextureMatrix: FloatArray,
         geometry: FrameGeometry,
         params: FrameParams,
+        external: Boolean = true,
+        texelScale: Float = 1f,
     ) {
-        val program = programFor(params.filter) ?: programFor(FilterCatalog.ORIGINAL) ?: passthrough() ?: return
+        val program = programFor(params.filter, external)
+            ?: programFor(FilterCatalog.ORIGINAL, external)
+            ?: (if (external) passthrough() else null)
+            ?: return
         GLES20.glViewport(0, 0, geometry.outputWidth, geometry.outputHeight)
         GLES20.glUseProgram(program.id)
 
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
-        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, oesTexture)
+        GLES20.glBindTexture(if (external) GLES11Ext.GL_TEXTURE_EXTERNAL_OES else GLES20.GL_TEXTURE_2D, texture)
         GLES20.glUniform1i(program.u("uTex"), 0)
 
         Matrix.multiplyMM(imageToTex, 0, surfaceTextureMatrix, 0, geometry.imageToGlTexture().toMat4(), 0)
         GLES20.glUniformMatrix4fv(program.u("uImageToTex"), 1, false, imageToTex, 0)
         GLES20.glUniformMatrix4fv(program.u("uOutputToImage"), 1, false, geometry.outputToImage().toMat4(), 0)
 
-        GLES20.glUniform2f(program.u("uTexel"), 1f / geometry.imageWidth, 1f / geometry.imageHeight)
+        GLES20.glUniform2f(
+            program.u("uTexel"),
+            1f / (geometry.imageWidth * texelScale),
+            1f / (geometry.imageHeight * texelScale),
+        )
         GLES20.glUniform1f(program.u("uAspect"), geometry.imageAspect)
         GLES20.glUniform1f(program.u("uTime"), params.timeSeconds)
         GLES20.glUniform1f(program.u("uIntensity"), params.intensity)
@@ -120,14 +135,15 @@ class FilterRenderer {
         }
     }
 
-    private fun programFor(filter: FilterDefinition): Program? {
-        if (filter.id in failed) return null
-        return programs.getOrPut(filter.id) {
+    private fun programFor(filter: FilterDefinition, external: Boolean = true): Program? {
+        val key = if (external) filter.id else "${filter.id}#2d"
+        if (key in failed) return null
+        return programs.getOrPut(key) {
             try {
-                build(FilterShaders.fragment(filter))
+                build(FilterShaders.fragment(filter, external))
             } catch (e: RuntimeException) {
-                Log.e(TAG, "Filter '${filter.id}' failed to compile", e)
-                failed += filter.id
+                Log.e(TAG, "Filter '$key' failed to compile", e)
+                failed += key
                 null
             }
         }

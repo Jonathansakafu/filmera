@@ -286,6 +286,90 @@ class CameraGlPipeline : Preview.SurfaceProvider {
         null
     }
 
+    /**
+     * Maps a point on the screen (fractions of the preview size) to normalized camera
+     * sensor coordinates, for tap-to-focus. Null before the first frame.
+     */
+    fun screenToSensor(xFraction: Float, yFraction: Float): android.graphics.PointF? {
+        val size = inputSize ?: return null
+        val g = geometry(size, mirror, displaySize.width, displaySize.height)
+        val toImage = g.outputToImage()
+        val ix = toImage.mapX(xFraction, yFraction)
+        val iy = toImage.mapY(xFraction, yFraction)
+        val toBuffer = g.imageToBuffer()
+        return android.graphics.PointF(
+            toBuffer.mapX(ix, iy).coerceIn(0f, 1f),
+            toBuffer.mapY(ix, iy).coerceIn(0f, 1f),
+        )
+    }
+
+    /** Largest texture/FBO side this GPU supports (queried on first use). */
+    private var maxTextureSize = 0
+
+    /**
+     * Applies the current filter to a full-resolution, upright, un-mirrored photo and
+     * returns the result. Blur and sharpen radii are scaled so the photo matches what the
+     * preview showed. Returns null if the GPU can't handle it (caller falls back).
+     */
+    suspend fun renderStill(photo: Bitmap, face: FaceData?): Bitmap? = withContext(glDispatcher) {
+        try {
+            egl.makeCurrent(idleSurface)
+            if (maxTextureSize == 0) {
+                val v = IntArray(1)
+                GLES20.glGetIntegerv(GLES20.GL_MAX_TEXTURE_SIZE, v, 0)
+                val rb = IntArray(1)
+                GLES20.glGetIntegerv(GLES20.GL_MAX_RENDERBUFFER_SIZE, rb, 0)
+                maxTextureSize = minOf(v[0], rb[0]).coerceAtLeast(2048)
+            }
+            val src = if (maxOf(photo.width, photo.height) > maxTextureSize) {
+                val k = maxTextureSize.toFloat() / maxOf(photo.width, photo.height)
+                Bitmap.createScaledBitmap(photo, (photo.width * k).toInt(), (photo.height * k).toInt(), true)
+            } else photo
+            val w = src.width
+            val h = src.height
+
+            val tex = IntArray(1)
+            GLES20.glGenTextures(1, tex, 0)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, tex[0])
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+            GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+            android.opengl.GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, src, 0)
+            if (src !== photo) src.recycle()
+
+            val fb = GlUtil.Framebuffer(w, h)
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fb.fbo)
+            // The bitmap is already upright: image space maps straight to texture space.
+            // imageToGlTexture() adds a vertical flip for camera textures; cancel it here.
+            val g = FrameGeometry(w, h, 0, mirror, w, h, outputBottomUp = true)
+            val flip = Affine2D.flipY().toMat4()
+            val previewShort = inputSize?.let { minOf(it.width, it.height) } ?: minOf(w, h)
+            val params = FrameParams(
+                filter = filter, intensity = intensity, adjust = adjust,
+                timeSeconds = ((System.nanoTime() - startNanos) / 1e9 % 3600.0).toFloat(),
+                face = face,
+            )
+            renderer.draw(
+                tex[0], flip, g, params,
+                external = false,
+                texelScale = previewShort.toFloat() / minOf(w, h),
+            )
+            val pixels = ByteBuffer.allocateDirect(w * h * 4).order(ByteOrder.nativeOrder())
+            GLES20.glReadPixels(0, 0, w, h, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, pixels)
+            GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0)
+            fb.release()
+            GLES20.glDeleteTextures(1, tex, 0)
+            Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).apply {
+                pixels.rewind()
+                copyPixelsFromBuffer(pixels)
+            }
+        } catch (e: Throwable) {
+            Log.e(TAG, "Full-resolution render failed", e)
+            null
+        }
+    }
+
     private fun recordStats(frameMs: Float, size: Size) {
         frameCount++
         frameTimeTotal += frameMs

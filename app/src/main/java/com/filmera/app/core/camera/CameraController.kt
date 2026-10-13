@@ -12,6 +12,7 @@ import androidx.camera.camera2.interop.ExperimentalCamera2Interop
 import androidx.camera.core.Camera
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageCapture
 import androidx.camera.core.Preview
 import androidx.camera.core.resolutionselector.AspectRatioStrategy
 import androidx.camera.core.resolutionselector.ResolutionSelector
@@ -34,6 +35,10 @@ class CameraController(private val context: Context) {
     private var provider: ProcessCameraProvider? = null
     private val analysisExecutor: ExecutorService = Executors.newSingleThreadExecutor()
     var camera: Camera? = null
+        private set
+
+    /** Full-resolution still capture, or null if this camera can't run it alongside preview. */
+    var imageCapture: ImageCapture? = null
         private set
 
     /**
@@ -79,11 +84,27 @@ class CameraController(private val context: Context) {
         }
         val preview = previewBuilder.build().apply { setSurfaceProvider(surfaceProvider) }
 
-        provider.unbindAll()
-        if (mode == Mode.SAFE) {
-            return provider.bindToLifecycle(owner, selector, preview).also { camera = it }
-        }
-        val analysis = ImageAnalysis.Builder()
+        // Photos use the camera's high-quality still pipeline at up to ~8 MP (12 MP on
+        // Ultra): full ISP noise reduction and sharpening, like the stock camera app.
+        val still = ImageCapture.Builder()
+            .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
+            .setResolutionSelector(
+                ResolutionSelector.Builder()
+                    .setAspectRatioStrategy(
+                        if (mode == Mode.COMPATIBLE) AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY
+                        else AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY,
+                    )
+                    .setResolutionStrategy(
+                        ResolutionStrategy(
+                            if (profile == QualityProfile.ULTRA) android.util.Size(4000, 3000) else android.util.Size(3264, 2448),
+                            ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER,
+                        ),
+                    )
+                    .build(),
+            )
+            .build()
+
+        val analysis = if (mode == Mode.SAFE) null else ImageAnalysis.Builder()
             .setResolutionSelector(
                 if (mode == Mode.BEST) resolution(profile.analysisSize, fourByThree = true)
                 else resolution(android.util.Size(640, 360), fourByThree = false),
@@ -92,7 +113,20 @@ class CameraController(private val context: Context) {
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .build()
             .apply { setAnalyzer(analysisExecutor, analyzer) }
-        return provider.bindToLifecycle(owner, selector, preview, analysis).also { camera = it }
+
+        provider.unbindAll()
+        val withStill = listOfNotNull(preview, analysis, still)
+        return try {
+            provider.bindToLifecycle(owner, selector, *withStill.toTypedArray())
+                .also { camera = it; imageCapture = still }
+        } catch (e: IllegalArgumentException) {
+            // Camera can't run this many streams together; photos fall back to preview frames.
+            Log.w(TAG, "Still capture not supported with preview here", e)
+            provider.unbindAll()
+            imageCapture = null
+            provider.bindToLifecycle(owner, selector, *listOfNotNull(preview, analysis).toTypedArray())
+                .also { camera = it }
+        }
     }
 
     fun hasCamera(front: Boolean): Boolean {
@@ -103,6 +137,7 @@ class CameraController(private val context: Context) {
     fun unbind() {
         provider?.unbindAll()
         camera = null
+        imageCapture = null
     }
 
     fun shutdown() {

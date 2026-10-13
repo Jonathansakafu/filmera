@@ -189,8 +189,8 @@ WhatsApp, low light, 5 minutes continuous use (heat).
 ## Known limitations
 
 - Live filters inside other apps' calls aren't possible (see above).
-- Photos are captured from the live stream (960p, 1080p or 1440p by quality level), not the sensor's
-  full resolution.
+- Photos use the camera's full-resolution still capture (up to 8 MP, 12 MP on Ultra) with the
+  filter applied at full size. Videos are recorded from the live stream (960p–1440p).
 - The app is locked to portrait.
 - Background blur or replacement isn't built yet (needs a segmentation model).
 - Face effects track one face at a time.
@@ -205,6 +205,5 @@ WhatsApp, low light, 5 minutes continuous use (heat).
 3. **FILMERA Call**: one-to-one video calls over WebRTC, with the filtered GL output
    as the video track. This is how live filtered calls become possible: both people use
    FILMERA. Needs a signaling server, TURN, and accounts or contact links.
-4. Full-resolution photo capture (ImageCapture + GPU reprocessing).
 5. Filter packs and a creator marketplace.
 6. Play Store release: signing, App Bundle, store listing, privacy policy.

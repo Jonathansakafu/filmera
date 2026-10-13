@@ -185,6 +185,9 @@ fun CameraScreen(
 @Composable
 private fun CameraPreview(vm: CameraViewModel, state: CameraUiState) {
     val zoom by rememberUpdatedState(state.zoom)
+    var focusPoint by remember { mutableStateOf<androidx.compose.ui.geometry.Offset?>(null) }
+    var focusKey by remember { mutableLongStateOf(0L) }
+    Box(Modifier.fillMaxSize()) {
     AndroidView(
         modifier = Modifier
             .fillMaxSize()
@@ -194,7 +197,14 @@ private fun CameraPreview(vm: CameraViewModel, state: CameraUiState) {
                 }
             }
             .pointerInput(Unit) {
-                detectTapGestures(onDoubleTap = { vm.flipCamera() })
+                detectTapGestures(
+                    onDoubleTap = { vm.flipCamera() },
+                    onTap = { pos ->
+                        vm.focusAt(pos.x / size.width, pos.y / size.height)
+                        focusPoint = pos
+                        focusKey = System.nanoTime()
+                    },
+                )
             },
         factory = { ctx ->
             SurfaceView(ctx).apply {
@@ -217,6 +227,36 @@ private fun CameraPreview(vm: CameraViewModel, state: CameraUiState) {
             }
         },
     )
+    focusPoint?.let { FocusRing(it, focusKey) { focusPoint = null } }
+    if (state.capturing) ShutterFlash()
+    }
+}
+
+/** Emerald ring that marks the tap-to-focus point, then fades. */
+@Composable
+private fun FocusRing(at: androidx.compose.ui.geometry.Offset, key: Long, onDone: () -> Unit) {
+    val anim = remember(key) { androidx.compose.animation.core.Animatable(0f) }
+    LaunchedEffect(key) {
+        anim.animateTo(1f, androidx.compose.animation.core.tween(900))
+        onDone()
+    }
+    val t = anim.value
+    androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {
+        val r = 34.dp.toPx() * (1.25f - 0.25f * minOf(t * 3f, 1f))
+        drawCircle(
+            FilmeraColors.Emerald.copy(alpha = (1f - t).coerceIn(0f, 1f)),
+            radius = r, center = at,
+            style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx()),
+        )
+    }
+}
+
+/** Brief white flash so the user knows the photo was taken. */
+@Composable
+private fun ShutterFlash() {
+    val alpha = remember { androidx.compose.animation.core.Animatable(0.6f) }
+    LaunchedEffect(Unit) { alpha.animateTo(0f, androidx.compose.animation.core.tween(350)) }
+    Box(Modifier.fillMaxSize().background(Color.White.copy(alpha = alpha.value)))
 }
 
 @Composable
@@ -261,6 +301,15 @@ private fun BoxScope.StudioOverlay(
         }
         Spacer(Modifier.height(12.dp))
         FaceHint(state)
+        AnimatedVisibility(state.capturing, enter = fadeIn(), exit = fadeOut(), modifier = Modifier.fillMaxWidth()) {
+            Box(Modifier.fillMaxWidth().padding(top = 8.dp), contentAlignment = Alignment.Center) {
+                Text(
+                    "Saving full-quality photo…",
+                    style = MaterialTheme.typography.labelMedium, color = Color.White,
+                    modifier = Modifier.clip(RoundedCornerShape(50)).background(FilmeraColors.Glass).padding(horizontal = 14.dp, vertical = 7.dp),
+                )
+            }
+        }
         if (state.settings.developerMode && state.settings.showPerformanceOverlay) {
             Spacer(Modifier.height(8.dp))
             DebugOverlay(state)
