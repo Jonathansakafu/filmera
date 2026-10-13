@@ -27,86 +27,108 @@ object FilterCatalog {
         // ---------------------------------------------------------------- COLOR
         FilterDefinition(
             id = "warm", name = "Warm", category = COLOR,
-            description = "Golden-hour warmth.",
+            description = "Golden-hour warmth that keeps whites clean.",
+            defaultIntensity = 0.8f,
             shader = """
-                vec3 c = cam(uv) * vec3(1.08, 1.0, 0.86) + vec3(0.025, 0.01, 0.0);
-                return saturate3(c, 1.08);
+                vec3 c = cam(uv);
+                float l = luma(c);
+                // Warm the mids and shadows more than the highlights so whites stay white.
+                vec3 tint = mix(vec3(1.08, 1.01, 0.88), vec3(1.03, 1.0, 0.96), smoothstep(0.6, 1.0, l));
+                c = filmic(c * tint + vec3(0.012, 0.004, -0.008), 0.25);
+                return saturate3(c, 1.06);
             """,
             swatch = 0xFFFFB46B to 0xFFE0643B,
         ),
         FilterDefinition(
             id = "cool", name = "Cool", category = COLOR,
-            description = "Crisp, clean blue tones.",
+            description = "Crisp, clean blue tones with natural skin.",
+            defaultIntensity = 0.8f,
             shader = """
-                vec3 c = cam(uv) * vec3(0.9, 1.0, 1.1) + vec3(0.0, 0.01, 0.03);
-                return saturate3(c, 1.05);
+                vec3 c = cam(uv);
+                vec3 cooled = c * vec3(0.94, 1.0, 1.08) + vec3(0.0, 0.005, 0.02);
+                // Keep faces from turning grey-blue.
+                c = mix(cooled, c * vec3(0.99, 1.0, 1.02), skinMask(c) * 0.6);
+                return saturate3(filmic(c, 0.2), 1.04);
             """,
             swatch = 0xFF7FD3FF to 0xFF3B6BE0,
         ),
         FilterDefinition(
             id = "cinema", name = "Cinema", category = COLOR,
-            description = "Teal shadows, warm highlights, soft vignette.",
+            description = "Teal shadows, warm skin and highlights, soft vignette.",
+            defaultIntensity = 0.75f,
             shader = """
                 vec3 c = cam(uv);
                 float l = luma(c);
-                c = mix(c * vec3(0.82, 1.0, 1.1), c * vec3(1.12, 1.0, 0.82), smoothstep(0.15, 0.85, l));
-                c = contrast3(c, 1.12);
-                return c * vignette(uv, 0.9);
+                vec3 shadows = vec3(-0.02, 0.03, 0.05) * (1.0 - smoothstep(0.0, 0.55, l));
+                vec3 highs = vec3(0.05, 0.02, -0.04) * smoothstep(0.45, 1.0, l);
+                vec3 graded = c + shadows + highs;
+                // Skin keeps its warmth instead of picking up the teal.
+                graded = mix(graded, c * vec3(1.04, 1.0, 0.95), skinMask(c) * 0.7);
+                graded = saturate3(filmic(graded, 0.55), 0.95);
+                return graded * mix(1.0, vignette(uv, 0.7), 0.8);
             """,
             swatch = 0xFF1FA2A6 to 0xFFF29A4A,
         ),
         FilterDefinition(
             id = "vintage", name = "Vintage", category = COLOR,
-            description = "Faded film with grain.",
+            description = "Faded film: lifted blacks, warm tones, fine grain.",
             animated = true,
+            defaultIntensity = 0.7f,
             shader = """
                 vec3 c = cam(uv);
                 vec3 sepia = vec3(dot(c, vec3(0.393, 0.769, 0.189)),
                                   dot(c, vec3(0.349, 0.686, 0.168)),
                                   dot(c, vec3(0.272, 0.534, 0.131)));
-                c = mix(c, sepia, 0.55);
-                c = c * 0.9 + 0.07;
-                c += grain(uv) * 0.06;
-                return c * vignette(uv, 1.1);
+                c = mix(c, sepia, 0.3);
+                c = c * vec3(0.9, 0.92, 0.86) + vec3(0.06, 0.055, 0.05); // faded blacks, soft whites
+                c += filmGrain(uv, c) * 0.035;
+                return saturate3(c, 0.85) * mix(1.0, vignette(uv, 0.9), 0.7);
             """,
             swatch = 0xFFD9B98A to 0xFF8A6A45,
         ),
         FilterDefinition(
             id = "bw", name = "B&W", category = COLOR,
-            description = "Classic black and white.",
-            shader = "return vec3(contrast3(vec3(luma(cam(uv))), 1.1));",
+            description = "Rich black and white.",
+            shader = """
+                vec3 c = cam(uv);
+                // Red-weighted mix flatters skin, like a classic yellow filter.
+                float l = dot(c, vec3(0.36, 0.53, 0.11));
+                return filmic(vec3(l), 0.45);
+            """,
             swatch = 0xFFE6E6E6 to 0xFF2A2A2A,
         ),
         FilterDefinition(
             id = "noir", name = "Noir", category = COLOR,
-            description = "High-contrast monochrome.",
+            description = "Dramatic high-contrast monochrome.",
             animated = true,
             shader = """
-                float l = smoothstep(0.12, 0.88, luma(cam(uv)));
-                l += grain(uv) * 0.05;
-                return vec3(l) * vignette(uv, 1.4);
+                vec3 c = cam(uv);
+                float l = smoothstep(0.06, 0.94, dot(c, vec3(0.36, 0.53, 0.11)));
+                l = filmic(vec3(l), 0.6).r + filmGrain(uv, vec3(l)) * 0.04;
+                return vec3(l) * mix(1.0, vignette(uv, 1.2), 0.85);
             """,
             swatch = 0xFF8C8C8C to 0xFF000000,
         ),
         FilterDefinition(
             id = "duotone", name = "Duotone", category = COLOR,
             description = "Two-color poster look.",
+            defaultIntensity = 0.85f,
             shader = """
-                float l = smoothstep(0.05, 0.95, luma(cam(uv)));
-                return mix(vec3(0.12, 0.05, 0.38), vec3(1.0, 0.58, 0.38), l);
+                float l = filmic(vec3(luma(cam(uv))), 0.5).r;
+                return mix(vec3(0.12, 0.05, 0.38), vec3(1.0, 0.62, 0.42), l);
             """,
             swatch = 0xFFFF9461 to 0xFF1F0D61,
         ),
         FilterDefinition(
             id = "dreamy", name = "Dreamy", category = COLOR,
-            description = "Soft pastel glow.",
+            description = "Soft highlight glow with pastel tones.",
             performance = MEDIUM,
+            defaultIntensity = 0.7f,
             shader = """
                 vec3 c = cam(uv);
-                vec3 b = blur9(uv, 6.0);
-                c = 1.0 - (1.0 - c) * (1.0 - b * 0.55);
-                c = mix(c, c * vec3(1.04, 0.97, 1.05), 0.8);
-                return saturate3(c, 0.9);
+                c = 1.0 - (1.0 - c) * (1.0 - bloom(uv, 5.0, 0.55) * 0.7);
+                c = c * vec3(1.02, 0.98, 1.03) + 0.02;
+                return saturate3(c, 0.88);
             """,
             swatch = 0xFFFFC6E5 to 0xFFB59CFF,
         ),
@@ -114,53 +136,65 @@ object FilterCatalog {
         // ------------------------------------------------------------- LIGHTING
         FilterDefinition(
             id = "glow", name = "Glow", category = LIGHTING,
-            description = "Soft light that flatters skin.",
+            description = "Soft, flattering light with a gentle highlight bloom.",
             performance = MEDIUM,
+            defaultIntensity = 0.7f,
             shader = """
                 vec3 c = cam(uv);
-                vec3 b = blur9(uv, 4.0);
-                vec3 screen = 1.0 - (1.0 - c) * (1.0 - b);
-                return mix(c, screen, 0.45) + 0.02;
+                vec3 soft = mix(c, blur9(uv, 2.0), skinMask(c) * 0.4);
+                vec3 b = bloom(uv, 4.0, 0.5);
+                c = 1.0 - (1.0 - soft) * (1.0 - b * 0.6);
+                return filmic(c * 1.03 + 0.015, 0.2);
             """,
             swatch = 0xFFFFE7B0 to 0xFFFFA36B,
         ),
         FilterDefinition(
             id = "studio", name = "Studio", category = LIGHTING,
-            description = "Brighter, punchier, clearer.",
+            description = "Brighter, clearer, punchier — like good lighting.",
             performance = MEDIUM,
+            defaultIntensity = 0.8f,
             shader = """
                 vec3 c = cam(uv);
-                vec3 b = blur9(uv, 1.5);
-                c += (c - b) * 0.6;
-                c = contrast3(c, 1.1) + 0.035;
-                return saturate3(c, 1.08);
+                c = sharpen(uv, c, 0.5);
+                vec3 b = blur9(uv, 6.0);
+                c += (c - b) * 0.25;                 // clarity
+                c = filmic(c * 1.05 + 0.02, 0.35);
+                return saturate3(c, 1.07);
             """,
             swatch = 0xFFFFFFFF to 0xFF9AA4B2,
         ),
         FilterDefinition(
             id = "lowlight", name = "Low Light", category = LIGHTING,
-            description = "Lifts dark scenes and calms noise.",
+            description = "Brightens dark scenes and calms noise without washing out.",
             performance = MEDIUM,
+            defaultIntensity = 0.85f,
             shader = """
                 vec3 c = cam(uv);
-                vec3 b = blur9(uv, 1.5);
-                float dark = 1.0 - smoothstep(0.0, 0.5, luma(c));
-                c = mix(c, b, 0.6 * dark);
-                c = pow(max(c, 0.0), vec3(0.62));
-                return saturate3(c, 1.12);
+                vec3 b = blur9(uv, 1.25);
+                float l = luma(b);
+                // Denoise only in dark areas, where noise shows.
+                c = mix(c, b, 0.55 * (1.0 - smoothstep(0.05, 0.4, l)));
+                // Lift exposure more where it's darker; leave bright areas alone.
+                float gain = mix(2.1, 1.0, smoothstep(0.03, 0.55, l));
+                c = c * gain;
+                c = c / (1.0 + max(c - 0.85, 0.0)); // soft roll-off instead of clipping
+                return saturate3(filmic(c, 0.25), 1.1);
             """,
             swatch = 0xFF4B5BD6 to 0xFF101233,
         ),
         FilterDefinition(
             id = "hdr", name = "HDR Look", category = LIGHTING,
-            description = "Boosted local detail and contrast.",
+            description = "Opens shadows and boosts local detail.",
             performance = MEDIUM,
+            defaultIntensity = 0.7f,
             shader = """
                 vec3 c = cam(uv);
-                vec3 b = blur9(uv, 8.0);
-                c = c + (c - b) * 1.1;
-                c = c / (c + 0.35) * 1.35;
-                return saturate3(c, 1.15);
+                vec3 b = blur9(uv, 10.0);
+                float lb = luma(b);
+                c *= mix(1.35, 0.92, smoothstep(0.1, 0.8, lb)); // lift shadows, tame highlights
+                c += (c - b) * 0.55;                            // local contrast
+                c = sharpen(uv, c, 0.3);
+                return saturate3(clamp(c, 0.0, 1.0), 1.12);
             """,
             swatch = 0xFFFFD84D to 0xFF2E7D32,
         ),
@@ -168,48 +202,56 @@ object FilterCatalog {
         // --------------------------------------------------------------- BEAUTY
         FilterDefinition(
             id = "smooth", name = "Skin Smooth", category = BEAUTY,
-            description = "Edge-aware smoothing that keeps eyes and hair sharp.",
+            description = "Smooths skin only — eyes, hair and background stay sharp.",
             performance = HEAVY,
+            defaultIntensity = 0.75f,
             shader = """
                 vec3 c = cam(uv);
                 vec3 sum = c;
                 float wsum = 1.0;
-                for (int i = 0; i < 12; i++) {
+                for (int i = 0; i < 16; i++) {
                     float fi = float(i);
-                    float a = fi * 0.5236;
-                    float r = mod(fi, 2.0) < 0.5 ? 3.5 : 7.0;
+                    float a = fi * 0.3927 + (mod(fi, 2.0) < 0.5 ? 0.0 : 0.19);
+                    float r = mod(fi, 2.0) < 0.5 ? 4.0 : 8.0;
                     vec3 s = cam(uv + vec2(cos(a), sin(a)) * uTexel * r);
                     vec3 d = s - c;
-                    float w = exp(-dot(d, d) * 60.0);
+                    float w = exp(-dot(d, d) * 90.0); // edge-aware: skip across edges
                     sum += s * w;
                     wsum += w;
                 }
                 vec3 smoothC = sum / wsum;
-                return smoothC * vec3(1.02, 1.01, 1.0) + 0.015;
+                float skin = skinMask(c);
+                vec3 outC = mix(c, smoothC, skin * 0.9);
+                outC += skin * vec3(0.02, 0.012, 0.008);       // a touch of healthy glow
+                return mix(outC, sharpen(uv, outC, 0.35), 1.0 - skin); // keep details crisp
             """,
             swatch = 0xFFFFD1BF to 0xFFE89A86,
         ),
         FilterDefinition(
             id = "tone", name = "Face Tone", category = BEAUTY,
-            description = "Even, warm skin tone with soft light.",
+            description = "Evens out skin tone with warm, soft light.",
             performance = MEDIUM,
+            defaultIntensity = 0.7f,
             shader = """
                 vec3 c = cam(uv);
-                vec3 b = blur9(uv, 3.0);
-                c = mix(c, b, 0.35);
-                c = c * vec3(1.05, 1.0, 0.95) + vec3(0.03, 0.015, 0.01);
-                return saturate3(c, 0.95);
+                float skin = skinMask(c);
+                vec3 even = mix(c, blur9(uv, 3.0), 0.45);
+                even = even * vec3(1.04, 1.0, 0.96) + vec3(0.025, 0.012, 0.008);
+                c = mix(c, even, skin);
+                return filmic(c * 1.02, 0.15);
             """,
             swatch = 0xFFF5C49C to 0xFFC27B5A,
         ),
         FilterDefinition(
             id = "detail", name = "Detail", category = BEAUTY,
-            description = "Sharpens fine detail.",
+            description = "Recovers fine detail from soft cameras.",
             performance = MEDIUM,
+            defaultIntensity = 0.7f,
             shader = """
                 vec3 c = cam(uv);
-                vec3 b = blur9(uv, 1.25);
-                return c + (c - b) * 1.4;
+                c = sharpen(uv, c, 1.1);
+                c += (c - blur9(uv, 3.0)) * 0.3;
+                return c;
             """,
             swatch = 0xFFCFE8FF to 0xFF5C7A99,
         ),
@@ -218,6 +260,7 @@ object FilterCatalog {
         FilterDefinition(
             id = "bigeyes", name = "Big Eyes", category = FACE,
             description = "Cartoon-sized eyes that follow your face.",
+            defaultIntensity = 0.8f,
             requiresFaceTracking = true, blendWithOriginal = false,
             shader = """
                 if (uFace < 0.5) return cam(uv);
@@ -363,10 +406,10 @@ object FilterCatalog {
             description = "Bold ink lines and flat color.",
             performance = MEDIUM,
             shader = """
-                vec3 c = blur9(uv, 1.0);
-                c = floor(c * 5.0 + 0.5) / 5.0;
-                float e = smoothstep(0.25, 0.6, edges(uv, 1.5));
-                return saturate3(c, 1.3) * (1.0 - e);
+                vec3 c = blur9(uv, 1.25);
+                c = floor(c * 7.0 + 0.5) / 7.0;
+                float e = smoothstep(0.3, 0.7, edges(uv, 1.5));
+                return saturate3(c, 1.12) * (1.0 - e * 0.9);
             """,
             swatch = 0xFFFFE44D to 0xFFFF3D3D,
         ),

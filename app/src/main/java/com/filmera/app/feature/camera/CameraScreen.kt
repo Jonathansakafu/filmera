@@ -46,6 +46,7 @@ import androidx.compose.material.icons.rounded.Cameraswitch
 import androidx.compose.material.icons.rounded.FlashOff
 import androidx.compose.material.icons.rounded.FlashOn
 import androidx.compose.material.icons.rounded.PhotoLibrary
+import androidx.compose.material.icons.rounded.Rotate90DegreesCw
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -243,7 +244,10 @@ private fun BoxScope.StudioOverlay(
             if (state.recording) {
                 RecordingTimer(state.recordStartedAt)
             } else {
-                QualityPill(state.profile.shortLabel)
+                QualityPill(
+                    if (state.debug.shortSide > 0) "${state.debug.shortSide}p · ${state.profile.fps}"
+                    else state.profile.shortLabel,
+                )
             }
             Spacer(Modifier.weight(1f))
             CameraControlButton(
@@ -387,7 +391,7 @@ private fun DebugOverlay(state: CameraUiState) {
     val lines = buildList {
         add("FPS ${"%.1f".format(d.fps)} / ${state.profile.fps}")
         add("Frame ${"%.1f".format(d.frameTimeMs)} ms (GPU path)")
-        add("Input ${d.resolution} · rot ${d.rotation}°")
+        add("Input ${d.resolution} · rot ${d.rotation}° · sensor ${d.sensorRotation}° · driver rotation ${if (d.cameraTransform) "undone" else "none"}")
         if (state.filter.requiresFaceTracking) add("Face ${d.faceLatencyMs} ms · ${if (state.faceVisible) "tracked" else "none"}")
         add("Memory ${d.memoryMb} MB · Thermal ${d.thermal}")
         add("Filter ${state.filter.id} · ${state.filter.performance}")
@@ -579,6 +583,31 @@ private fun AdjustSheet(state: CameraUiState, vm: CameraViewModel, onDismiss: ()
                 "Applied on top of any filter, live.",
                 style = MaterialTheme.typography.bodySmall, color = FilmeraColors.TextMuted,
             )
+            Spacer(Modifier.height(12.dp))
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(FilmeraColors.SurfaceHigh)
+                    .clickable { vm.rotatePicture() }
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Icons.Rounded.Rotate90DegreesCw, null, tint = FilmeraColors.Emerald, modifier = Modifier.size(20.dp))
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("Picture sideways? Rotate it", style = MaterialTheme.typography.titleSmall, color = FilmeraColors.Text)
+                    Text(
+                        "Fix for phones that report the camera angle wrong. Saved for next time.",
+                        style = MaterialTheme.typography.bodySmall, color = FilmeraColors.TextMuted,
+                    )
+                }
+                Text(
+                    "${state.settings.rotationFix}°",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = if (state.settings.rotationFix == 0) FilmeraColors.TextMuted else FilmeraColors.Emerald,
+                )
+            }
             Spacer(Modifier.height(16.dp))
             listOf("Brightness", "Contrast", "Saturation", "Warmth").forEachIndexed { i, label ->
                 Row(verticalAlignment = Alignment.CenterVertically) {

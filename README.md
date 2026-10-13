@@ -74,6 +74,16 @@ Each camera frame is drawn once per output on a dedicated GL thread, with no CPU
 except for photo capture. Face tracking runs on low-resolution analysis frames and only
 while a face filter is selected.
 
+### Camera orientation
+
+Many camera drivers rotate (and, for front cameras, mirror) preview buffers and fold
+that into the SurfaceTexture matrix. Others don't, and CameraX's `hasCameraTransform()`
+flag doesn't reliably say which. `FrameGeometry.orientationCorrection` reads the rotation
+straight from the matrix's sign pattern and undoes it, so every device ends up upright.
+If a device still misbehaves, Settings → *Camera orientation fix* (or the Enhance panel)
+adds a saved manual quarter-turn. The log line `CameraGlPipeline: Texture matrix ...`
+shows what a device reports.
+
 ### Coordinate spaces
 
 Filters and face landmarks use one shared **image space**: upright, un-mirrored, 0..1,
@@ -179,7 +189,7 @@ WhatsApp, low light, 5 minutes continuous use (heat).
 ## Known limitations
 
 - Live filters inside other apps' calls aren't possible (see above).
-- Photos are captured from the live stream (720p, or 1080p on Ultra), not the sensor's
+- Photos are captured from the live stream (960p, 1080p or 1440p by quality level), not the sensor's
   full resolution.
 - The app is locked to portrait.
 - Background blur or replacement isn't built yet (needs a segmentation model).

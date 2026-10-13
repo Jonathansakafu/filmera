@@ -13,17 +13,20 @@ enum class QualityProfile(
     val faceStride: Int,
     val videoBitrate: Int,
 ) {
+    // 4:3 sizes: phone and tablet sensors are natively 4:3, so these are the sharpest,
+    // widest modes a camera offers. 16:9 modes are often cropped or low-resolution on
+    // cheaper (especially front) cameras.
     PERFORMANCE(
-        "Performance", "720p · 24 fps · lighter face tracking. Best for older phones.",
-        Size(1280, 720), 24, Size(480, 270), 3, 4_000_000,
+        "Performance", "960p · 24 fps · lighter face tracking. Best for older phones.",
+        Size(1280, 960), 24, Size(480, 360), 3, 5_000_000,
     ),
     BALANCED(
-        "Balanced", "720p · 30 fps. Smooth on most phones.",
-        Size(1280, 720), 30, Size(640, 360), 2, 6_000_000,
+        "Balanced", "1080p · 30 fps. Smooth on most phones.",
+        Size(1440, 1080), 30, Size(640, 480), 2, 8_000_000,
     ),
     ULTRA(
-        "Ultra", "1080p · 30 fps · full-rate face tracking. For recent high-end phones.",
-        Size(1920, 1080), 30, Size(640, 360), 1, 12_000_000,
+        "Ultra", "1440p · 30 fps · full-rate face tracking. For recent high-end phones.",
+        Size(1920, 1440), 30, Size(640, 480), 1, 14_000_000,
     ),
     ;
 

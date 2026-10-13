@@ -27,7 +27,7 @@ import kotlin.coroutines.resumeWithException
 
 /**
  * Binds CameraX use cases: a Preview feeding the GL pipeline and an ImageAnalysis feeding
- * face tracking. Both use 16:9 so face landmarks line up with the picture.
+ * face tracking. Both use 4:3 (the sensor's native shape) so face landmarks line up with the picture.
  */
 class CameraController(private val context: Context) {
 
@@ -42,9 +42,14 @@ class CameraController(private val context: Context) {
         profile: QualityProfile,
         surfaceProvider: Preview.SurfaceProvider,
         analyzer: ImageAnalysis.Analyzer,
+        /** Called with (sensorRotationDegrees, isFrontFacing) before frames start. */
+        onCameraSelected: (Int, Boolean) -> Unit = { _, _ -> },
     ): Camera {
         val provider = provider ?: awaitProvider().also { provider = it }
         val selector = selectorFor(provider, front)
+        selector.filter(provider.availableCameraInfos).firstOrNull()?.let { info ->
+            onCameraSelected(info.sensorRotationDegrees, info.lensFacing == CameraSelector.LENS_FACING_FRONT)
+        }
 
         val previewBuilder = Preview.Builder()
             .setResolutionSelector(resolution(profile.previewSize))
@@ -84,7 +89,7 @@ class CameraController(private val context: Context) {
     }
 
     private fun resolution(size: android.util.Size) = ResolutionSelector.Builder()
-        .setAspectRatioStrategy(AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY)
+        .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
         .setResolutionStrategy(
             ResolutionStrategy(size, ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER),
         )

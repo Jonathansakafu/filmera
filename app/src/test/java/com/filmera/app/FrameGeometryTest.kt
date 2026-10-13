@@ -78,4 +78,44 @@ class FrameGeometryTest {
         val g = FrameGeometry(1280, 720, 90, false, 720, 1280, outputBottomUp = true)
         assertPoint(g.outputToImage(), 0f, 0f, 0f, 1f)
     }
+
+    @Test
+    fun rotateCcwGlMatchesRotateM() {
+        // 90° CCW about the center in y-up coords: right-middle goes to top-middle.
+        assertPoint(Affine2D.rotateCcwGl(90), 1f, 0.5f, 0.5f, 1f)
+        assertPoint(Affine2D.rotateCcwGl(270), 1f, 0.5f, 0.5f, 0f)
+    }
+
+    @Test
+    fun inverseUndoesMap() {
+        val m = Affine2D.rotateCcwGl(90).then(Affine2D.centerCrop(0.5f, 0.7f)).then(Affine2D.flipX())
+        assertPoint(m.then(m.inverse()), 0.3f, 0.8f, 0.3f, 0.8f)
+    }
+
+    private fun stOf(m: Affine2D) = m.toMat4()
+
+    /**
+     * Drivers that pre-transform the buffer report st' = st · R · M. Reading the sign pattern
+     * of st' must recover a correction that makes (correction, then st') equal st, for every
+     * quarter-turn and mirror, with a realistic crop scale in st.
+     */
+    @Test
+    fun driverTransformIsUndoneFromMatrix() {
+        val stPlain = Affine2D.flipY().then(Affine2D(a = 0.98f, d = 0.97f, tx = 0.01f, ty = 0.015f))
+        for (rot in listOf(0, 90, 180, 270)) for (mirror in listOf(false, true)) {
+            val rm = (if (mirror) Affine2D.flipX() else Affine2D.IDENTITY).then(Affine2D.rotateCcwGl(rot))
+            val stDriver = rm.then(stPlain) // point map of st · R · M
+            val corrected = FrameGeometry.orientationCorrection(stOf(stDriver)).then(stDriver)
+            for ((u, v) in listOf(0f to 0f, 1f to 0f, 0.25f to 0.75f)) {
+                assertEquals("rot=$rot mirror=$mirror", stPlain.mapX(u, v), corrected.mapX(u, v), 1e-5f)
+                assertEquals("rot=$rot mirror=$mirror", stPlain.mapY(u, v), corrected.mapY(u, v), 1e-5f)
+            }
+        }
+    }
+
+    @Test
+    fun plainMatrixNeedsNoCorrection() {
+        val stPlain = Affine2D.flipY().then(Affine2D(a = 0.98f, d = 0.97f, tx = 0.01f, ty = 0.015f))
+        assertEquals(Affine2D.IDENTITY, FrameGeometry.orientationCorrection(stOf(stPlain)))
+    }
 }

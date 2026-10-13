@@ -33,6 +33,8 @@ data class FilterDefinition(
     val blendWithOriginal: Boolean = true,
     val performance: PerformanceLevel = PerformanceLevel.LIGHT,
     val animated: Boolean = false,
+    /** Starting strength. Most looks read best below 100%. */
+    val defaultIntensity: Float = 1f,
     /** Two ARGB colors used to draw the filter's chip in the carousel. */
     val swatch: Pair<Long, Long>,
 )

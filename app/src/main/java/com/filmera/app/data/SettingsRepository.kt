@@ -20,6 +20,8 @@ data class Settings(
     val showPerformanceOverlay: Boolean = false,
     val recentFilters: List<String> = emptyList(),
     val lastFilter: String = "original",
+    /** Extra clockwise rotation (0/90/180/270) for devices that report it wrong. */
+    val rotationFix: Int = 0,
 )
 
 private val Context.dataStore by preferencesDataStore(name = "settings")
@@ -36,6 +38,7 @@ class SettingsRepository(private val context: Context) {
         val perfOverlay = booleanPreferencesKey("perf_overlay")
         val recentFilters = stringPreferencesKey("recent_filters")
         val lastFilter = stringPreferencesKey("last_filter")
+        val rotationFix = androidx.datastore.preferences.core.intPreferencesKey("rotation_fix")
     }
 
     val settings: Flow<Settings> = context.dataStore.data.map { p ->
@@ -50,6 +53,7 @@ class SettingsRepository(private val context: Context) {
             showPerformanceOverlay = p[Keys.perfOverlay] ?: false,
             recentFilters = p[Keys.recentFilters]?.split(',')?.filter { it.isNotBlank() } ?: emptyList(),
             lastFilter = p[Keys.lastFilter] ?: "original",
+            rotationFix = p[Keys.rotationFix] ?: 0,
         )
     }
 
@@ -64,6 +68,7 @@ class SettingsRepository(private val context: Context) {
     suspend fun setRecordAudio(v: Boolean) = set(Keys.recordAudio, v)
     suspend fun setDeveloperMode(v: Boolean) = set(Keys.developerMode, v)
     suspend fun setPerformanceOverlay(v: Boolean) = set(Keys.perfOverlay, v)
+    suspend fun setRotationFix(degrees: Int) = set(Keys.rotationFix, ((degrees % 360) + 360) % 360)
 
     /** Remembers the filter and moves it to the front of the recent list (max 8). */
     suspend fun useFilter(id: String) {

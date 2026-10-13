@@ -31,6 +31,16 @@ data class Affine2D(
         ty = next.b * tx + next.d * ty + next.ty,
     )
 
+    /** The inverse map. Only valid for non-degenerate maps (all maps used here are). */
+    fun inverse(): Affine2D {
+        val det = a * d - b * c
+        val ia = d / det
+        val ib = -b / det
+        val ic = -c / det
+        val id = a / det
+        return Affine2D(ia, ib, ic, id, -(ia * tx + ic * ty), -(ib * tx + id * ty))
+    }
+
     /** Column-major 4x4 matrix, for use as a GLSL `mat4` applied to vec4(u, v, 0, 1). */
     fun toMat4(): FloatArray = floatArrayOf(
         a, b, 0f, 0f,
@@ -58,6 +68,26 @@ data class Affine2D(
             // (x, y) -> (y, 1 - x)
             270 -> Affine2D(a = 0f, b = -1f, c = 1f, d = 0f, tx = 0f, ty = 1f)
             else -> throw IllegalArgumentException("Rotation must be a multiple of 90: $degrees")
+        }
+
+        /**
+         * Counter-clockwise rotation by [degrees] (a multiple of 90) about (0.5, 0.5), in
+         * GL texture coordinates (y up). Matches android.opengl.Matrix.rotateM about z.
+         */
+        fun rotateCcwGl(degrees: Int): Affine2D {
+            val (cos, sin) = when (((degrees % 360) + 360) % 360) {
+                0 -> 1f to 0f
+                90 -> 0f to 1f
+                180 -> -1f to 0f
+                270 -> 0f to -1f
+                else -> throw IllegalArgumentException("Rotation must be a multiple of 90: $degrees")
+            }
+            // p' = c + R (p - c), with c = (0.5, 0.5)
+            return Affine2D(
+                a = cos, b = sin, c = -sin, d = cos,
+                tx = 0.5f - 0.5f * cos + 0.5f * sin,
+                ty = 0.5f - 0.5f * sin - 0.5f * cos,
+            )
         }
 
         /**

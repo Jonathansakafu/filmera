@@ -40,10 +40,14 @@ data class DebugInfo(
     val frameTimeMs: Float = 0f,
     val faceLatencyMs: Long = 0,
     val resolution: String = "-",
+    /** Short side of the frames the camera actually delivers (e.g. 960 for 1280×960). */
+    val shortSide: Int = 0,
     val rotation: Int = 0,
     val memoryMb: Long = 0,
     val thermal: String = "-",
     val gpu: String = "",
+    val cameraTransform: Boolean = false,
+    val sensorRotation: Int = 0,
     val failedFilters: Set<String> = emptySet(),
 )
 
@@ -100,6 +104,8 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             container.settings.settings.collect { s ->
                 _state.update { it.copy(settings = s) }
                 pipeline.mirror = _state.value.front && s.mirrorFront
+                pipeline.rotationOffset = s.rotationFix
+                faceTracker.rotationOffset = s.rotationFix
                 if (s.quality != quality) {
                     quality = s.quality
                     onQualityChanged()
@@ -134,7 +140,10 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
             faceTracker.frameStride = profile.faceStride
             try {
                 val front = _state.value.front
-                val camera = controller.bind(lifecycleOwner, front, profile, pipeline, faceTracker)
+                val camera = controller.bind(lifecycleOwner, front, profile, pipeline, faceTracker) { sensor, isFront ->
+                    pipeline.sensorRotation = sensor
+                    pipeline.frontFacing = isFront
+                }
                 pipeline.mirror = front && settings.mirrorFront
                 boundAt = System.currentTimeMillis()
                 slowWindows = 0
@@ -178,7 +187,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
 
     fun selectFilter(filter: FilterDefinition, remember: Boolean = true) {
         pipeline.filter = filter
-        val intensity = intensities[filter.id] ?: 1f
+        val intensity = intensities[filter.id] ?: filter.defaultIntensity
         pipeline.intensity = intensity
         faceTracker.enabled = filter.requiresFaceTracking
         _state.update { it.copy(filter = filter, intensity = intensity) }
@@ -207,6 +216,12 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     fun resetAdjust() {
         pipeline.adjust = FloatArray(4)
         _state.update { it.copy(adjust = listOf(0f, 0f, 0f, 0f)) }
+    }
+
+    /** Rotates the camera picture 90° clockwise (saved), for devices that report it wrong. */
+    fun rotatePicture() {
+        val next = (_state.value.settings.rotationFix + 90) % 360
+        viewModelScope.launch { container.settings.setRotationFix(next) }
     }
 
     fun setMode(mode: CaptureMode) {
@@ -325,10 +340,13 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                         frameTimeMs = stats.frameTimeMs,
                         faceLatencyMs = if (st.filter.requiresFaceTracking) faceTracker.latencyMs else 0,
                         resolution = stats.inputSize?.let { s -> "${s.width}×${s.height}" } ?: "-",
+                        shortSide = stats.inputSize?.let { s -> minOf(s.width, s.height) } ?: 0,
                         rotation = stats.rotation,
                         memoryMb = memMb,
                         thermal = thermal,
                         gpu = stats.glRenderer,
+                        cameraTransform = stats.textureCorrected,
+                        sensorRotation = stats.sensorRotation,
                         failedFilters = pipeline.failedFilters,
                     ),
                 )

@@ -30,6 +30,10 @@ data class PipelineStats(
     val rotation: Int = 0,
     val glRenderer: String = "",
     val glesVersion: Int = 0,
+    val cameraTransform: Boolean = false,
+    val sensorRotation: Int = 0,
+    /** True when the driver's texture matrix contained a rotation/mirror that we undo. */
+    val textureCorrected: Boolean = false,
 )
 
 /**
@@ -74,6 +78,13 @@ class CameraGlPipeline : Preview.SurfaceProvider {
     @Volatile var face: FaceData? = null
     /** Mirror the picture (front camera selfie view). Applies to every output. */
     @Volatile var mirror: Boolean = false
+    /** Sensor orientation and facing of the bound camera (diagnostics only). */
+    @Volatile var sensorRotation: Int = 0
+    @Volatile var frontFacing: Boolean = false
+    /** Manual fix from Settings for devices that still report the wrong rotation. */
+    @Volatile var rotationOffset: Int = 0
+    private var textureCorrection = Affine2D.IDENTITY
+    private var loggedMatrix = false
 
     private val startNanos = System.nanoTime()
 
@@ -115,10 +126,14 @@ class CameraGlPipeline : Preview.SurfaceProvider {
             val previous = inputTexture
             inputTexture = texture
             oesTexture = textureId
+            loggedMatrix = false
             inputSize = size
             texture.setOnFrameAvailableListener({ if (inputTexture === it) drawFrame() }, handler)
             request.setTransformationInfoListener(glExecutor) { info ->
                 inputRotation = info.rotationDegrees
+                Log.i(TAG, "Camera frames ${size.width}x${size.height}, rotation ${info.rotationDegrees}, " +
+                    "HAL transform ${info.hasCameraTransform()}, sensor $sensorRotation, front $frontFacing")
+                _stats.value = _stats.value.copy(cameraTransform = info.hasCameraTransform())
             }
             request.provideSurface(surface, glExecutor) {
                 surface.release()
@@ -188,6 +203,14 @@ class CameraGlPipeline : Preview.SurfaceProvider {
             egl.makeCurrent(displaySurface ?: idleSurface)
             texture.updateTexImage()
             texture.getTransformMatrix(stMatrix)
+            val correction = FrameGeometry.orientationCorrection(stMatrix)
+            if (correction != textureCorrection || !loggedMatrix) {
+                loggedMatrix = true
+                Log.i(TAG, "Texture matrix 2x2 [%.2f %.2f; %.2f %.2f] -> correction %s".format(
+                    stMatrix[0], stMatrix[4], stMatrix[1], stMatrix[5],
+                    if (correction == Affine2D.IDENTITY) "none" else correction.toString()))
+            }
+            textureCorrection = correction
         } catch (e: RuntimeException) {
             Log.w(TAG, "updateTexImage failed", e)
             return
@@ -203,20 +226,14 @@ class CameraGlPipeline : Preview.SurfaceProvider {
         val mirrored = mirror
 
         displaySurface?.let { s ->
-            val g = FrameGeometry(
-                size.width, size.height, inputRotation, mirrored,
-                displaySize.width, displaySize.height,
-            )
+            val g = geometry(size, mirrored, displaySize.width, displaySize.height)
             renderer.draw(oesTexture, stMatrix, g, params)
             egl.swapBuffers(s)
         }
 
         recordSurface?.let { s ->
             egl.makeCurrent(s)
-            val g = FrameGeometry(
-                size.width, size.height, inputRotation, mirrored,
-                recordSize.width, recordSize.height, outputRotation = recordRotation,
-            )
+            val g = geometry(size, mirrored, recordSize.width, recordSize.height, outputRotation = recordRotation)
             renderer.draw(oesTexture, stMatrix, g, params)
             // Encoder timestamps share System.nanoTime's clock with the microphone, so
             // audio and video stay in sync.
@@ -233,14 +250,23 @@ class CameraGlPipeline : Preview.SurfaceProvider {
         recordStats((SystemClock.elapsedRealtimeNanos() - began) / 1e6f, size)
     }
 
+    private fun geometry(
+        size: Size, mirrored: Boolean, outW: Int, outH: Int,
+        outputRotation: Int = 0, bottomUp: Boolean = false,
+    ) = FrameGeometry(
+        size.width, size.height, (inputRotation + rotationOffset) % 360, mirrored, outW, outH,
+        outputRotation = outputRotation, outputBottomUp = bottomUp,
+        textureCorrection = textureCorrection,
+    )
+
     private fun renderPhoto(size: Size, mirrored: Boolean, params: FrameParams): Bitmap? = try {
         egl.makeCurrent(idleSurface)
-        val probe = FrameGeometry(size.width, size.height, inputRotation, mirrored, 1, 1)
+        val probe = geometry(size, mirrored, 1, 1)
         val w = probe.imageWidth
         val h = probe.imageHeight
         val fb = GlUtil.Framebuffer(w, h)
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, fb.fbo)
-        val g = FrameGeometry(size.width, size.height, inputRotation, mirrored, w, h, outputBottomUp = true)
+        val g = geometry(size, mirrored, w, h, bottomUp = true)
         renderer.draw(oesTexture, stMatrix, g, params)
         val pixels = ByteBuffer.allocateDirect(w * h * 4).order(ByteOrder.nativeOrder())
         GLES20.glReadPixels(0, 0, w, h, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, pixels)
@@ -266,6 +292,8 @@ class CameraGlPipeline : Preview.SurfaceProvider {
                 frameTimeMs = frameTimeTotal / frameCount,
                 inputSize = size,
                 rotation = inputRotation,
+                sensorRotation = sensorRotation,
+                textureCorrected = textureCorrection != Affine2D.IDENTITY,
             )
             frameCount = 0
             frameTimeTotal = 0f

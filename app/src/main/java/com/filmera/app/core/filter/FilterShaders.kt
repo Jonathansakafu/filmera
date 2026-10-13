@@ -90,6 +90,44 @@ float edges(vec2 uv, float radius) {
     return length(vec2(gx, gy));
 }
 
+/** 5-tap unsharp mask: cheap detail recovery for soft phone cameras. */
+vec3 sharpen(vec2 uv, vec3 c, float amount) {
+    vec3 n = cam(uv + vec2(uTexel.x, 0.0)) + cam(uv - vec2(uTexel.x, 0.0))
+           + cam(uv + vec2(0.0, uTexel.y)) + cam(uv - vec2(0.0, uTexel.y));
+    return c + (c - n * 0.25) * amount;
+}
+
+/** Gentle film-style S-curve; k = 0 is linear, 1 is a full smoothstep. */
+vec3 filmic(vec3 c, float k) {
+    c = clamp(c, 0.0, 1.0);
+    return mix(c, c * c * (3.0 - 2.0 * c), k);
+}
+
+/** Soft highlight glow: blurred bright areas only. */
+vec3 bloom(vec2 uv, float radius, float threshold) {
+    vec3 b = blur9(uv, radius) * 0.5 + blur9(uv, radius * 2.2) * 0.5;
+    return max(b - threshold, 0.0) / (1.0 - threshold);
+}
+
+/**
+ * Likelihood (0..1) that a color is skin, from its chroma in YCbCr. Works across skin
+ * tones because it ignores brightness. Used to keep beauty effects off hair, eyes and
+ * backgrounds.
+ */
+float skinMask(vec3 c) {
+    float cb = 0.5 - 0.168736 * c.r - 0.331264 * c.g + 0.5 * c.b;
+    float cr = 0.5 + 0.5 * c.r - 0.418688 * c.g - 0.081312 * c.b;
+    float m = smoothstep(0.29, 0.33, cb) * (1.0 - smoothstep(0.49, 0.53, cb))
+            * smoothstep(0.51, 0.54, cr) * (1.0 - smoothstep(0.66, 0.70, cr));
+    return m * smoothstep(0.08, 0.2, luma(c));
+}
+
+/** Film grain weighted toward mid-tones, where it looks natural. */
+float filmGrain(vec2 uv, vec3 c) {
+    float l = luma(c);
+    return grain(uv) * (1.0 - abs(l - 0.5) * 1.6);
+}
+
 // ---- Face helpers. All face math runs in "aspect space" (x scaled by uAspect) so
 // circles stay round on non-square images.
 

@@ -24,6 +24,7 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Mic
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.PhotoLibrary
+import androidx.compose.material.icons.rounded.ScreenRotation
 import androidx.compose.material.icons.rounded.Shield
 import androidx.compose.material.icons.rounded.Speed
 import androidx.compose.material3.HorizontalDivider
@@ -95,6 +96,17 @@ fun SettingsScreen(onBack: () -> Unit, onOpenCompatibility: () -> Unit, onOpenPr
                     ToggleRow("Save to phone gallery", "Also copy every capture to Pictures/FILMERA and Movies/FILMERA", Icons.Rounded.PhotoLibrary, settings.autoSaveToGallery) {
                         scope.launch { repo.setAutoSave(it) }
                     }
+                    Divider()
+                    SettingsRow(
+                        "Camera orientation fix",
+                        if (settings.rotationFix == 0) "Automatic. Tap if the picture is sideways or upside down."
+                        else "Rotated ${settings.rotationFix}° clockwise. Tap to change, until it reaches 0° again.",
+                        Icons.Rounded.ScreenRotation,
+                        onClick = { scope.launch { repo.setRotationFix(settings.rotationFix + 90) } },
+                        trailing = {
+                            Text("${settings.rotationFix}°", style = MaterialTheme.typography.labelLarge, color = FilmeraColors.Emerald)
+                        },
+                    )
                     Divider()
                     ToggleRow("Record sound", "Uses the microphone only while recording a video", Icons.Rounded.Mic, settings.recordAudio) {
                         scope.launch { repo.setRecordAudio(it) }

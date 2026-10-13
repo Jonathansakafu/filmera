@@ -36,6 +36,9 @@ class FaceTracker(
             }
         }
 
+    /** Manual rotation fix from Settings; must match the preview's. */
+    @Volatile var rotationOffset = 0
+
     /** Process every Nth frame. Set from the quality profile. */
     @Volatile var frameStride = 1
 
@@ -85,7 +88,7 @@ class FaceTracker(
         val upright: Bitmap
         try {
             val raw = image.toBitmap()
-            val rotation = image.imageInfo.rotationDegrees
+            val rotation = (image.imageInfo.rotationDegrees + rotationOffset) % 360
             upright = if (rotation == 0) raw else {
                 val m = Matrix().apply { postRotate(rotation.toFloat()) }
                 Bitmap.createBitmap(raw, 0, 0, raw.width, raw.height, m, true).also { raw.recycle() }
