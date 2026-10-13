@@ -18,6 +18,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.BugReport
 import androidx.compose.material.icons.rounded.Code
 import androidx.compose.material.icons.rounded.Flip
 import androidx.compose.material.icons.rounded.Info
@@ -120,6 +121,18 @@ fun SettingsScreen(onBack: () -> Unit, onOpenCompatibility: () -> Unit, onOpenPr
                     SettingsRow("Device compatibility", "What this phone supports", Icons.Rounded.PhoneAndroid, onOpenCompatibility)
                     Divider()
                     SettingsRow("Privacy", "How your camera data is handled", Icons.Rounded.Shield, onOpenPrivacy)
+                    Divider()
+                    SettingsRow(
+                        "Send problem report",
+                        "Shares device details and FILMERA's error log. No photos or videos.",
+                        Icons.Rounded.BugReport,
+                        onClick = {
+                            scope.launch {
+                                val report = com.filmera.app.core.performance.ProblemReport.build(context)
+                                context.container.share.shareText("FILMERA problem report", report)
+                            }
+                        },
+                    )
                     Divider()
                     SettingsRow(
                         "Version ${BuildConfig.VERSION_NAME}",

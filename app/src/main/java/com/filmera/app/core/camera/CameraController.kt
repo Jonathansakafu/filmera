@@ -36,12 +36,27 @@ class CameraController(private val context: Context) {
     var camera: Camera? = null
         private set
 
+    /**
+     * Camera configurations from best to most compatible. Some cameras accept a
+     * configuration and then never deliver frames, so the caller tries the next mode when
+     * no picture arrives (see CameraViewModel's watchdog).
+     */
+    enum class Mode(val label: String) {
+        /** 4:3 sensor-native size from the quality profile, fixed frame rate, face tracking. */
+        BEST("Full quality"),
+        /** 16:9 at 720p, camera-chosen frame rate, face tracking. */
+        COMPATIBLE("Compatibility"),
+        /** Preview only at the camera's default size. No face tracking. */
+        SAFE("Safe mode"),
+    }
+
     suspend fun bind(
         owner: LifecycleOwner,
         front: Boolean,
         profile: QualityProfile,
         surfaceProvider: Preview.SurfaceProvider,
         analyzer: ImageAnalysis.Analyzer,
+        mode: Mode = Mode.BEST,
         /** Called with (sensorRotationDegrees, isFrontFacing) before frames start. */
         onCameraSelected: (Int, Boolean) -> Unit = { _, _ -> },
     ): Camera {
@@ -52,18 +67,31 @@ class CameraController(private val context: Context) {
         }
 
         val previewBuilder = Preview.Builder()
-            .setResolutionSelector(resolution(profile.previewSize))
-        applyFrameRate(previewBuilder, provider, selector, profile.fps)
+        when (mode) {
+            Mode.BEST -> {
+                previewBuilder.setResolutionSelector(resolution(profile.previewSize, fourByThree = true))
+                applyFrameRate(previewBuilder, provider, selector, profile.fps)
+            }
+            Mode.COMPATIBLE -> previewBuilder.setResolutionSelector(
+                resolution(android.util.Size(1280, 720), fourByThree = false),
+            )
+            Mode.SAFE -> Unit
+        }
         val preview = previewBuilder.build().apply { setSurfaceProvider(surfaceProvider) }
 
+        provider.unbindAll()
+        if (mode == Mode.SAFE) {
+            return provider.bindToLifecycle(owner, selector, preview).also { camera = it }
+        }
         val analysis = ImageAnalysis.Builder()
-            .setResolutionSelector(resolution(profile.analysisSize))
+            .setResolutionSelector(
+                if (mode == Mode.BEST) resolution(profile.analysisSize, fourByThree = true)
+                else resolution(android.util.Size(640, 360), fourByThree = false),
+            )
             .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_RGBA_8888)
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .build()
             .apply { setAnalyzer(analysisExecutor, analyzer) }
-
-        provider.unbindAll()
         return provider.bindToLifecycle(owner, selector, preview, analysis).also { camera = it }
     }
 
@@ -88,8 +116,11 @@ class CameraController(private val context: Context) {
         else if (front) CameraSelector.DEFAULT_BACK_CAMERA else CameraSelector.DEFAULT_FRONT_CAMERA
     }
 
-    private fun resolution(size: android.util.Size) = ResolutionSelector.Builder()
-        .setAspectRatioStrategy(AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY)
+    private fun resolution(size: android.util.Size, fourByThree: Boolean) = ResolutionSelector.Builder()
+        .setAspectRatioStrategy(
+            if (fourByThree) AspectRatioStrategy.RATIO_4_3_FALLBACK_AUTO_STRATEGY
+            else AspectRatioStrategy.RATIO_16_9_FALLBACK_AUTO_STRATEGY,
+        )
         .setResolutionStrategy(
             ResolutionStrategy(size, ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER),
         )

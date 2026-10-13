@@ -56,7 +56,7 @@ class FilterRenderer {
         geometry: FrameGeometry,
         params: FrameParams,
     ) {
-        val program = programFor(params.filter) ?: programFor(FilterCatalog.ORIGINAL) ?: return
+        val program = programFor(params.filter) ?: programFor(FilterCatalog.ORIGINAL) ?: passthrough() ?: return
         GLES20.glViewport(0, 0, geometry.outputWidth, geometry.outputHeight)
         GLES20.glUseProgram(program.id)
 
@@ -101,6 +101,25 @@ class FilterRenderer {
         GLES20.glUniform2f(program.u(name), p[0], p[1])
     }
 
+    private var passthroughProgram: Program? = null
+    private var passthroughFailed = false
+
+    /**
+     * Last resort when even Original fails on a GPU: a minimal shader with none of the
+     * shared helpers, so the user still sees their camera.
+     */
+    private fun passthrough(): Program? {
+        if (passthroughFailed) return null
+        passthroughProgram?.let { return it }
+        return try {
+            build(PASSTHROUGH).also { passthroughProgram = it }
+        } catch (e: RuntimeException) {
+            Log.e(TAG, "Passthrough shader failed", e)
+            passthroughFailed = true
+            null
+        }
+    }
+
     private fun programFor(filter: FilterDefinition): Program? {
         if (filter.id in failed) return null
         return programs.getOrPut(filter.id) {
@@ -136,6 +155,17 @@ class FilterRenderer {
 
     private companion object {
         const val TAG = "FilterRenderer"
+
+        val PASSTHROUGH = """
+#extension GL_OES_EGL_image_external : require
+precision mediump float;
+varying vec2 vImageUv;
+uniform samplerExternalOES uTex;
+uniform mat4 uImageToTex;
+void main() {
+    gl_FragColor = vec4(texture2D(uTex, (uImageToTex * vec4(vImageUv, 0.0, 1.0)).xy).rgb, 1.0);
+}
+"""
 
         fun floatBuffer(vararg values: Float): FloatBuffer =
             ByteBuffer.allocateDirect(values.size * 4).order(ByteOrder.nativeOrder())

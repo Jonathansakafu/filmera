@@ -69,6 +69,7 @@ data class CameraUiState(
     val lastCapture: Capture? = null,
     val message: String? = null,
     val cameraError: String? = null,
+    val cameraMode: CameraController.Mode = CameraController.Mode.BEST,
     val zoom: Float = 0f,
     val debug: DebugInfo = DebugInfo(),
     val settings: Settings = Settings(),
@@ -93,6 +94,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
     private var boundAt = 0L
     private var autoProfile: QualityProfile? = null
     private var filterChosen = false
+    private var watchdog: Job? = null
 
     init {
         viewModelScope.launch {
@@ -132,17 +134,30 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         settings.quality.fixedProfile() ?: autoProfile ?: DeviceInfo.collect(getApplication()).recommended
             .also { autoProfile = it }
 
-    private fun rebind() {
+    private fun savedMode(settings: Settings, front: Boolean): CameraController.Mode =
+        (if (front) settings.cameraModeFront else settings.cameraModeBack)
+            ?.let { runCatching { CameraController.Mode.valueOf(it) }.getOrNull() }
+            ?: CameraController.Mode.BEST
+
+    private fun rebind(mode: CameraController.Mode? = null) {
         val lifecycleOwner = owner?.get() ?: return
+        watchdog?.cancel()
         viewModelScope.launch {
             val settings = container.settings.settings.first()
             val profile = currentProfile(settings)
+            val front = _state.value.front
+            val useMode = mode ?: savedMode(settings, front)
             faceTracker.frameStride = profile.faceStride
             try {
-                val front = _state.value.front
-                val camera = controller.bind(lifecycleOwner, front, profile, pipeline, faceTracker) { sensor, isFront ->
+                val camera = controller.bind(
+                    lifecycleOwner, front, profile, pipeline, faceTracker, useMode,
+                ) { sensor, isFront ->
                     pipeline.sensorRotation = sensor
                     pipeline.frontFacing = isFront
+                }
+                Log.i(TAG, "Bound ${if (front) "front" else "back"} camera in $useMode, profile $profile")
+                camera.cameraInfo.cameraState.observe(lifecycleOwner) { cs ->
+                    cs.error?.let { Log.w(TAG, "Camera state ${cs.type} error ${it.code}", it.cause) }
                 }
                 pipeline.mirror = front && settings.mirrorFront
                 boundAt = System.currentTimeMillis()
@@ -154,13 +169,61 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
                         torch = false,
                         zoom = 0f,
                         cameraError = null,
+                        cameraMode = useMode,
                         faceStatus = faceTracker.status,
                     )
                 }
+                startWatchdog(front, useMode)
             } catch (e: Exception) {
-                Log.e(TAG, "Camera bind failed", e)
-                _state.update { it.copy(cameraError = "The camera couldn't start. Close other camera apps and try again.") }
+                Log.e(TAG, "Camera bind failed in $useMode", e)
+                val next = nextMode(useMode)
+                if (next != null) rebind(next)
+                else _state.update { it.copy(cameraError = CAMERA_FAILED) }
             }
+        }
+    }
+
+    private fun nextMode(mode: CameraController.Mode) =
+        CameraController.Mode.entries.getOrNull(mode.ordinal + 1)
+
+    /**
+     * Some cameras accept a configuration and then never send a frame. If nothing arrives
+     * in time, fall back to the next, more compatible mode, and remember the one that works.
+     */
+    private fun startWatchdog(front: Boolean, mode: CameraController.Mode) {
+        val startFrames = pipeline.framesReceived
+        watchdog = viewModelScope.launch {
+            delay(WATCHDOG_MS)
+            if (pipeline.framesReceived > startFrames) {
+                val saved = savedMode(container.settings.settings.first(), front)
+                if (saved != mode) container.settings.setCameraMode(front, mode.name)
+                return@launch
+            }
+            Log.w(TAG, "No camera frames in $mode after ${WATCHDOG_MS}ms")
+            val next = nextMode(mode)
+            if (next != null) {
+                toast("Camera switched to ${next.label.lowercase()} for this device")
+                rebind(next)
+            } else {
+                _state.update { it.copy(cameraError = CAMERA_FAILED) }
+            }
+        }
+    }
+
+    /** Clears the remembered mode and starts again from full quality. */
+    fun retryCamera() {
+        viewModelScope.launch {
+            container.settings.setCameraMode(_state.value.front, CameraController.Mode.BEST.name)
+            _state.update { it.copy(cameraError = null) }
+            rebind(CameraController.Mode.BEST)
+        }
+    }
+
+    /** Opens the share sheet with a problem report (device facts + this app's log). */
+    fun sendProblemReport(note: String?) {
+        viewModelScope.launch {
+            val report = com.filmera.app.core.performance.ProblemReport.build(getApplication(), note)
+            container.share.shareText("FILMERA problem report", report)
         }
     }
 
@@ -368,7 +431,7 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
         }
         autoProfile = lower
         toast("Performance mode enabled to keep video smooth")
-        rebind()
+        rebind(st.cameraMode)
     }
 
     fun onQualityChanged() {
@@ -388,5 +451,9 @@ class CameraViewModel(app: Application) : AndroidViewModel(app) {
 
     private companion object {
         const val TAG = "CameraViewModel"
+        const val WATCHDOG_MS = 6000L
+        const val CAMERA_FAILED =
+            "The camera isn't sending a picture. Close other camera apps, then tap Try again. " +
+                "If it keeps happening, tap Send report."
     }
 }

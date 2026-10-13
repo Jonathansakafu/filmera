@@ -88,6 +88,10 @@ class CameraGlPipeline : Preview.SurfaceProvider {
 
     private val startNanos = System.nanoTime()
 
+    /** Camera frames received so far. The watchdog uses this to detect a silent camera. */
+    @Volatile var framesReceived = 0L
+        private set
+
     private val _stats = MutableStateFlow(PipelineStats())
     val stats: StateFlow<PipelineStats> = _stats
     private var frameCount = 0
@@ -202,6 +206,7 @@ class CameraGlPipeline : Preview.SurfaceProvider {
         try {
             egl.makeCurrent(displaySurface ?: idleSurface)
             texture.updateTexImage()
+            framesReceived++
             texture.getTransformMatrix(stMatrix)
             val correction = FrameGeometry.orientationCorrection(stMatrix)
             if (correction != textureCorrection || !loggedMatrix) {

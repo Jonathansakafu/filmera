@@ -265,13 +265,7 @@ private fun BoxScope.StudioOverlay(
             Spacer(Modifier.height(8.dp))
             DebugOverlay(state)
         }
-        state.cameraError?.let {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                it, color = Color.White, style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.clip(RoundedCornerShape(12.dp)).background(FilmeraColors.Danger.copy(alpha = 0.85f)).padding(12.dp),
-            )
-        }
+        state.cameraError?.let { CameraErrorCard(it, vm) }
     }
 
     // Bottom controls
@@ -327,6 +321,30 @@ private fun BoxScope.StudioOverlay(
 }
 
 @Composable
+private fun CameraErrorCard(message: String, vm: CameraViewModel) {
+    Spacer(Modifier.height(16.dp))
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(FilmeraColors.Surface)
+            .border(1.dp, FilmeraColors.Danger.copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+            .padding(18.dp),
+    ) {
+        Text("No camera picture", style = MaterialTheme.typography.titleMedium, color = FilmeraColors.Text)
+        Spacer(Modifier.height(6.dp))
+        Text(message, style = MaterialTheme.typography.bodyMedium, color = FilmeraColors.TextMuted)
+        Spacer(Modifier.height(14.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            com.filmera.app.core.ui.components.PrimaryButton("Try again", vm::retryCamera, Modifier.weight(1f))
+            com.filmera.app.core.ui.components.SecondaryButton(
+                "Send report", { vm.sendProblemReport("Camera shows no picture") }, Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+@Composable
 private fun QualityPill(text: String) {
     Text(
         text,
@@ -368,6 +386,8 @@ private fun RecordingTimer(startedAt: Long) {
 private fun FaceHint(state: CameraUiState) {
     val text = when {
         !state.filter.requiresFaceTracking -> null
+        state.cameraMode == com.filmera.app.core.camera.CameraController.Mode.SAFE ->
+            "Face effects are off in safe mode on this device"
         state.faceStatus == FaceTracker.Status.UNAVAILABLE -> "Face tracking isn't available on this device"
         state.faceStatus == FaceTracker.Status.LOADING -> "Starting face tracking…"
         !state.faceVisible -> "Looking for a face…"
@@ -389,7 +409,7 @@ private fun FaceHint(state: CameraUiState) {
 private fun DebugOverlay(state: CameraUiState) {
     val d = state.debug
     val lines = buildList {
-        add("FPS ${"%.1f".format(d.fps)} / ${state.profile.fps}")
+        add("FPS ${"%.1f".format(d.fps)} / ${state.profile.fps} · ${state.cameraMode.label}")
         add("Frame ${"%.1f".format(d.frameTimeMs)} ms (GPU path)")
         add("Input ${d.resolution} · rot ${d.rotation}° · sensor ${d.sensorRotation}° · driver rotation ${if (d.cameraTransform) "undone" else "none"}")
         if (state.filter.requiresFaceTracking) add("Face ${d.faceLatencyMs} ms · ${if (state.faceVisible) "tracked" else "none"}")
